@@ -1,70 +1,113 @@
 #include <BleKeyboard.h>
 
-// Nome do dispositivo Bluetooth e Fabricante
 BleKeyboard bleKeyboard("SplitKeyboard-C3", "JeffSC", 100);
 
-// Pinos da Matriz da Metade Esquerda (4 linhas x 6 colunas)
+#define KEY_FN 0xFF
+
 const int ROW_PINS[4] = {0, 1, 2, 3};
 const int COL_PINS[6] = {4, 5, 6, 7, 8, 10};
 
-// Mapeamento das 21 Teclas (Matriz 4x6)
-// Linha 0: ESC, Q, W, E, R, T
-// Linha 1: TAB, A, S, D, F, G
-// Linha 2: LShift, Z, X, C, V, B
-// Linha 3: Thumbs (LAlt, LCtrl, Space)
-uint8_t keymap[4][6] = {
+bool layerFN = false;
+
+// CAMADA 0 (Base) - Metade Esquerda
+uint8_t keymap_left_base[4][6] = {
   { KEY_ESC,        'q', 'w', 'e', 'r', 't' },
   { KEY_TAB,        'a', 's', 'd', 'f', 'g' },
   { KEY_LEFT_SHIFT, 'z', 'x', 'c', 'v', 'b' },
   { 0,              0,   0,   KEY_LEFT_ALT, KEY_LEFT_CTRL, ' ' }
 };
 
-bool keyState[4][6] = {false};
+// CAMADA 1 (FN) - Metade Esquerda
+uint8_t keymap_left_fn[4][6] = {
+  { '`',            '1', '2', '3', '4', '5' },
+  { KEY_TAB,        KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5 },
+  { KEY_LEFT_SHIFT, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10 },
+  { 0,              0,   0,   KEY_LEFT_ALT, KEY_LEFT_CTRL, ' ' }
+};
+
+// CAMADA 0 (Base) - Metade Direita (Índices 0..23)
+uint8_t keymap_right_base[24] = {
+  KEY_BACKSPACE,   'p', 'o', 'i', 'u', 'y',
+  KEY_RETURN,      ';', 'l', 'k', 'j', 'h',
+  KEY_RIGHT_SHIFT, '/', '.', ',', 'm', 'n',
+  ' ',             KEY_FN, KEY_RIGHT_ALT, 0, 0, 0
+};
+
+// CAMADA 1 (FN) - Metade Direita (Índices 0..23)
+uint8_t keymap_right_fn[24] = {
+  KEY_DELETE,     '[', ']', '-', '=', '6',
+  KEY_RETURN,     '\\', KEY_UP_ARROW, ';', '9', '8',
+  KEY_RIGHT_SHIFT, KEY_LEFT_ARROW, KEY_DOWN_ARROW, KEY_RIGHT_ARROW, '0', '7',
+  ' ',            KEY_FN, KEY_RIGHT_ALT, 0, 0, 0
+};
+
+bool keyStateLeft[4][6] = {false};
 
 void setup() {
-  // Inicializa o serviço Bluetooth HID
   bleKeyboard.begin();
+  Serial1.begin(9600, SERIAL_8N1, 20, 21);
 
-  // Configura Linhas como saída (Estado Inicial HIGH)
   for (int r = 0; r < 4; r++) {
     pinMode(ROW_PINS[r], OUTPUT);
     digitalWrite(ROW_PINS[r], HIGH);
   }
 
-  // Configura Colunas como entrada com Pull-Up interno
   for (int c = 0; c < 6; c++) {
     pinMode(COL_PINS[c], INPUT_PULLUP);
   }
 }
 
 void loop() {
-  // A varredura só roda se o Bluetooth estiver conectado a um host
-  if (bleKeyboard.isConnected()) {
-    for (int r = 0; r < 4; r++) {
-      digitalWrite(ROW_PINS[r], LOW);
-      delayMicroseconds(10);
+  // 1. Processa a Metade Esquerda
+  for (int r = 0; r < 4; r++) {
+    digitalWrite(ROW_PINS[r], LOW);
+    delayMicroseconds(10);
 
-      for (int c = 0; c < 6; c++) {
-        // Pula os 3 slots vazios da linha do polegar
-        if (r == 3 && c < 3) continue;
+    for (int c = 0; c < 6; c++) {
+      if (r == 3 && c < 3) continue;
 
-        bool pressed = (digitalRead(COL_PINS[c]) == LOW);
+      bool pressed = (digitalRead(COL_PINS[c]) == LOW);
 
-        if (pressed != keyState[r][c]) {
-          keyState[r][c] = pressed;
-          uint8_t key = keymap[r][c];
+      if (pressed != keyStateLeft[r][c]) {
+        keyStateLeft[r][c] = pressed;
 
-          if (key != 0) {
-            if (pressed) {
-              bleKeyboard.press(key);
-            } else {
-              bleKeyboard.release(key);
-            }
+        uint8_t key = layerFN ? keymap_left_fn[r][c] : keymap_left_base[r][c];
+
+        if (key != 0 && bleKeyboard.isConnected()) {
+          if (pressed) {
+            bleKeyboard.press(key);
+          } else {
+            bleKeyboard.release(key);
           }
         }
       }
-      digitalWrite(ROW_PINS[r], HIGH);
+    }
+    digitalWrite(ROW_PINS[r], HIGH);
+  }
+
+  // 2. Processa a Metade Direita (Serial TRRS a 9600 baud)
+  while (Serial1.available() > 0) {
+    uint8_t b = Serial1.read();
+    bool pressed = (b & 0x80) != 0;
+    uint8_t keyIndex = b & 0x7F;
+
+    if (keyIndex < 24) {
+      uint8_t baseKey = keymap_right_base[keyIndex];
+
+      if (baseKey == KEY_FN) {
+        layerFN = pressed;
+      } else if (bleKeyboard.isConnected()) {
+        uint8_t keyToSend = layerFN ? keymap_right_fn[keyIndex] : baseKey;
+
+        if (keyToSend != 0) {
+          if (pressed) {
+            bleKeyboard.press(keyToSend);
+          } else {
+            bleKeyboard.release(keyToSend);
+          }
+        }
+      }
     }
   }
-  delay(10); // Debounce de 10ms
+  delay(10);
 }
