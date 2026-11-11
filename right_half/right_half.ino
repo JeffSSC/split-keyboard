@@ -27,9 +27,6 @@ void loop() {
     delayMicroseconds(10);
 
     for (int c = 0; c < 6; c++) {
-      // Skip unused thumb cluster intersections if applicable
-      if (r == 3 && c >= 3) continue;
-
       bool pressed = (digitalRead(COL_PINS[c]) == LOW);
 
       if (pressed != keyStateRight[r][c]) {

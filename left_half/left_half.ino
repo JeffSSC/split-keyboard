@@ -5,7 +5,7 @@ BleKeyboard bleKeyboard("SplitKeyboard-C3", "JeffSC", 100);
 #define KEY_FN 0xFF
 
 const int ROW_PINS[4] = {0, 1, 2, 3};
-const int COL_PINS[6] = {4, 5, 6, 7, 8, 10};
+const int COL_PINS[6] = {4, 5, 6, 7, 8, 9};
 
 bool layerFN = false;
 
@@ -30,7 +30,7 @@ uint8_t keymap_right_base[24] = {
   KEY_BACKSPACE,   'p', 'o', 'i', 'u', 'y',
   KEY_RETURN,      ';', 'l', 'k', 'j', 'h',
   KEY_RIGHT_SHIFT, '/', '.', ',', 'm', 'n',
-  ' ',             KEY_FN, KEY_RIGHT_ALT, 0, 0, 0
+  0,               0,      0,             KEY_LEFT_GUI, KEY_FN, ' '
 };
 
 // CAMADA 1 (FN) - Metade Direita (Índices 0..23)
@@ -38,10 +38,14 @@ uint8_t keymap_right_fn[24] = {
   KEY_DELETE,     '[', ']', '-', '=', '6',
   KEY_RETURN,     '\\', KEY_UP_ARROW, ';', '9', '8',
   KEY_RIGHT_SHIFT, KEY_LEFT_ARROW, KEY_DOWN_ARROW, KEY_RIGHT_ARROW, '0', '7',
-  ' ',            KEY_FN, KEY_RIGHT_ALT, 0, 0, 0
+  0,              0,      0,             KEY_LEFT_GUI, KEY_FN, ' '
 };
 
 bool keyStateLeft[4][6] = {false};
+
+// Key sent on press, so release always matches it even if the layer changed meanwhile
+uint8_t sentKeyLeft[4][6] = {0};
+uint8_t sentKeyRight[24] = {0};
 
 void setup() {
   bleKeyboard.begin();
@@ -71,7 +75,10 @@ void loop() {
       if (pressed != keyStateLeft[r][c]) {
         keyStateLeft[r][c] = pressed;
 
-        uint8_t key = layerFN ? keymap_left_fn[r][c] : keymap_left_base[r][c];
+        uint8_t key = pressed
+          ? (layerFN ? keymap_left_fn[r][c] : keymap_left_base[r][c])
+          : sentKeyLeft[r][c];
+        sentKeyLeft[r][c] = pressed ? key : 0;
 
         if (key != 0 && bleKeyboard.isConnected()) {
           if (pressed) {
@@ -97,7 +104,10 @@ void loop() {
       if (baseKey == KEY_FN) {
         layerFN = pressed;
       } else if (bleKeyboard.isConnected()) {
-        uint8_t keyToSend = layerFN ? keymap_right_fn[keyIndex] : baseKey;
+        uint8_t keyToSend = pressed
+          ? (layerFN ? keymap_right_fn[keyIndex] : baseKey)
+          : sentKeyRight[keyIndex];
+        sentKeyRight[keyIndex] = pressed ? keyToSend : 0;
 
         if (keyToSend != 0) {
           if (pressed) {
